@@ -10,3 +10,19 @@ __pycache__/
 input.txt
 env/
 venv/
+
+# Dashboard and test artifacts
+*.log
+dashboard_debug.log
+dashboard_test_page.html
+*_report.json
+*_benchmark.json
+browser_compatibility_*.json
+validation_report.json
+integration_test_*.json
+
+# Environment and documentation artifacts
+environment.yml
+ENVIRONMENT_SETUP.md
+DASHBOARD_TEST_REPORT.md
+BROWSER_COMPATIBILITY_*.md

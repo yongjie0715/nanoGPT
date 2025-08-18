@@ -20,6 +20,7 @@ import os
 import time
 import math
 import pickle
+import signal
 from contextlib import nullcontext
 
 import numpy as np
@@ -72,11 +73,28 @@ backend = 'nccl' # 'nccl', 'gloo', etc.
 device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
 compile = True # use PyTorch 2.0 to compile the model to be faster
+dashboard = True # enable web dashboard for training visualization
 # -----------------------------------------------------------------------------
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open('configurator.py').read()) # overrides from command line or config file
 config = {k: globals()[k] for k in config_keys} # will be useful for logging
 # -----------------------------------------------------------------------------
+
+# conditional dashboard import with error handling
+dashboard_broadcaster = None
+if dashboard:
+    try:
+        from web.dashboard import DashboardBroadcaster
+        dashboard_broadcaster = DashboardBroadcaster()
+        print("Dashboard module imported successfully")
+    except ImportError as e:
+        print(f"Warning: Could not import dashboard module: {e}")
+        print("Training will continue without dashboard functionality.")
+        dashboard_broadcaster = None
+    except Exception as e:
+        print(f"Warning: Dashboard initialization failed: {e}")
+        print("Training will continue without dashboard functionality.")
+        dashboard_broadcaster = None
 
 # various inits, derived attributes, I/O setup
 ddp = int(os.environ.get('RANK', -1)) != -1 # is this a ddp run?
@@ -211,6 +229,42 @@ if compile:
 if ddp:
     model = DDP(model, device_ids=[ddp_local_rank])
 
+# initialize dashboard after model setup
+if dashboard_broadcaster is not None and master_process:
+    try:
+        print("Starting dashboard server...")
+        dashboard_broadcaster.start_server()
+        print("Dashboard server started successfully at http://localhost:8080")
+    except Exception as e:
+        print(f"Warning: Dashboard server failed to start: {e}")
+        print("Training will continue without dashboard functionality.")
+        dashboard_broadcaster = None
+
+# Set up signal handlers for graceful dashboard cleanup
+def signal_handler(signum, frame):
+    """Handle signals like SIGINT (Ctrl+C) and SIGTERM for graceful dashboard cleanup."""
+    if dashboard_broadcaster is not None and master_process:
+        try:
+            print(f"\nReceived signal {signum}, cleaning up dashboard...")
+            dashboard_broadcaster.log_status('interrupted', f'Training interrupted by signal {signum}')
+            dashboard_broadcaster.shutdown('interrupted', f'Training interrupted by signal {signum}')
+        except Exception as e:
+            print(f"Warning: Dashboard cleanup failed during signal handling: {e}")
+    
+    # Clean up DDP if needed
+    if ddp:
+        try:
+            destroy_process_group()
+        except Exception as e:
+            print(f"Warning: DDP cleanup failed during signal handling: {e}")
+    
+    # Exit with appropriate code
+    exit(128 + signum)
+
+# Register signal handlers for graceful shutdown
+signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
+signal.signal(signal.SIGTERM, signal_handler)  # Termination signal
+
 # helps estimate an arbitrarily accurate loss over either split using many batches
 @torch.no_grad()
 def estimate_loss():
@@ -249,6 +303,7 @@ if wandb_log and master_process:
 # training loop
 X, Y = get_batch('train') # fetch the very first batch
 t0 = time.time()
+training_start_time = t0  # Track overall training start time for dashboard
 local_iter_num = 0 # number of iterations in the lifetime of this process
 raw_model = model.module if ddp else model # unwrap DDP container if needed
 running_mfu = -1.0
@@ -285,6 +340,14 @@ while True:
                 print(f"saving checkpoint to {out_dir}")
                 torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
     if iter_num == 0 and eval_only:
+        # Dashboard cleanup for eval-only mode
+        if dashboard_broadcaster is not None and master_process:
+            try:
+                dashboard_broadcaster.send_completion_status('Evaluation completed')
+                dashboard_broadcaster.shutdown('complete', 'Evaluation completed')
+                print("Dashboard: Evaluation completed, server shutting down")
+            except Exception as e:
+                print(f"Warning: Dashboard cleanup failed: {e}")
         break
 
     # forward backward update, with optional gradient accumulation to simulate larger batch size
@@ -325,12 +388,74 @@ while True:
             mfu = raw_model.estimate_mfu(batch_size * gradient_accumulation_steps, dt)
             running_mfu = mfu if running_mfu == -1.0 else 0.9*running_mfu + 0.1*mfu
         print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms, mfu {running_mfu*100:.2f}%")
+        
+        # Dashboard logging integration
+        if dashboard_broadcaster is not None:
+            try:
+                # Calculate elapsed time since training start
+                elapsed_time = time.time() - training_start_time
+                
+                # Debug: Print dashboard logging attempt
+                print(f"[DEBUG] Sending to dashboard: iter={iter_num}, loss={lossf:.4f}, elapsed={elapsed_time:.1f}s")
+                
+                # Send training metrics to dashboard
+                dashboard_broadcaster.log_metrics({
+                    'iter': iter_num,
+                    'loss': lossf,
+                    'elapsed': elapsed_time
+                })
+                print(f"[DEBUG] Dashboard logging completed successfully")
+            except Exception as e:
+                # Fail-safe: continue training even if dashboard logging fails
+                print(f"[DEBUG] Dashboard logging failed: {e}")
+                pass
     iter_num += 1
     local_iter_num += 1
 
     # termination conditions
     if iter_num > max_iters:
+        # Dashboard cleanup for normal training completion
+        if dashboard_broadcaster is not None and master_process:
+            try:
+                dashboard_broadcaster.send_completion_status(f'Training completed after {max_iters} iterations')
+                dashboard_broadcaster.shutdown('complete', f'Training completed successfully after {max_iters} iterations')
+                print("Dashboard: Training completed, server shutting down")
+            except Exception as e:
+                print(f"Warning: Dashboard cleanup failed: {e}")
         break
 
-if ddp:
-    destroy_process_group()
+# Final dashboard cleanup and DDP cleanup
+try:
+    # Clean up dashboard resources on training completion
+    if dashboard_broadcaster is not None and master_process:
+        try:
+            # If we reach here without explicit completion status, send general completion
+            dashboard_broadcaster.send_completion_status('Training session ended')
+            dashboard_broadcaster.shutdown('complete', 'Training session ended')
+            print("Dashboard: Training session ended, server shutting down")
+        except Exception as e:
+            print(f"Warning: Dashboard cleanup failed: {e}")
+except KeyboardInterrupt:
+    # Handle Ctrl+C interruption gracefully
+    print("\nTraining interrupted by user (Ctrl+C)")
+    if dashboard_broadcaster is not None and master_process:
+        try:
+            dashboard_broadcaster.log_status('interrupted', 'Training interrupted by user')
+            dashboard_broadcaster.shutdown('interrupted', 'Training interrupted by user (Ctrl+C)')
+        except Exception as e:
+            print(f"Warning: Dashboard cleanup failed during interruption: {e}")
+    raise  # Re-raise to maintain normal interrupt behavior
+except Exception as e:
+    # Handle any other training errors
+    print(f"\nTraining failed with error: {e}")
+    if dashboard_broadcaster is not None and master_process:
+        try:
+            dashboard_broadcaster.log_status('error', f'Training failed: {str(e)}')
+            dashboard_broadcaster.shutdown('error', f'Training failed with error: {str(e)}')
+        except Exception as cleanup_error:
+            print(f"Warning: Dashboard cleanup failed during error handling: {cleanup_error}")
+    raise  # Re-raise to maintain normal error behavior
+finally:
+    # Ensure DDP cleanup always happens
+    if ddp:
+        destroy_process_group()

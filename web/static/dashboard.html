@@ -1,0 +1,1844 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>nanoGPT Dashboard</title>
+    <!-- Chart.js CDN for enhanced visualizations -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            height: 100vh;
+            overflow-x: hidden;
+        }
+        
+        .container {
+            height: 100vh;
+            display: grid;
+            grid-template-rows: auto 1fr auto;
+            background-color: white;
+        }
+        
+        .header {
+            background-color: #2c3e50;
+            color: white;
+            padding: 10px 20px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 1.8em;
+        }
+        
+        .content {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            grid-template-rows: 1fr;
+            gap: 15px;
+            padding: 10px;
+            overflow: hidden;
+        }
+        
+        /* Metrics sidebar */
+        .metrics-section {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .status-display {
+            background-color: #ecf0f1;
+            padding: 10px;
+            border-radius: 6px;
+            text-align: center;
+            font-size: 0.9em;
+        }
+        
+        .status-indicator {
+            font-weight: bold;
+            font-size: 1em;
+        }
+        
+        .status-training { color: #27ae60; }
+        .status-complete { color: #3498db; }
+        .status-error { color: #e74c3c; }
+        
+        .metrics-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .metric-item {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 6px;
+            border-left: 4px solid #3498db;
+        }
+        
+        .metric-label {
+            font-size: 0.8em;
+            color: #7f8c8d;
+            margin-bottom: 3px;
+        }
+        
+        .metric-value {
+            font-size: 1.1em;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        /* Chart as main content */
+        .chart-section {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        
+        .chart-container {
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+            padding: 15px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .chart-title {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        
+        .chart-wrapper {
+            position: relative;
+            flex: 1;
+            width: 100%;
+            background-color: white;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+            padding: 15px;
+            box-sizing: border-box;
+            min-height: 450px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .chart-canvas-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            min-height: 400px;
+        }
+        
+        #loss-chart-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        
+        /* Fallback canvas styles for backwards compatibility */
+        #loss-chart {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: white;
+            max-width: 100%;
+            height: auto;
+        }
+        
+        /* Footer */
+        .footer {
+            background-color: #ecf0f1;
+            padding: 8px 20px;
+            text-align: center;
+            font-size: 0.8em;
+            color: #7f8c8d;
+        }
+        
+        /* Responsive design */
+        @media (max-width: 768px) {
+            .content {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto 1fr;
+                gap: 10px;
+            }
+            
+            .metrics-section {
+                flex-direction: row;
+                overflow-x: auto;
+            }
+            
+            .metrics-grid {
+                flex-direction: row;
+                min-width: 600px;
+            }
+            
+            .metric-item {
+                min-width: 120px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>nanoGPT Dashboard</h1>
+        </header>
+        
+        <main class="content">
+            <!-- Metrics sidebar -->
+            <section class="metrics-section" id="metrics">
+                <!-- Status display -->
+                <div class="status-display">
+                    <div class="status-indicator" id="status">
+                        Status: <span id="status-value" class="status-training">Initializing</span>
+                    </div>
+                </div>
+                
+                <!-- Metrics grid -->
+                <div class="metrics-grid">
+                    <div class="metric-item">
+                        <div class="metric-label">Iteration</div>
+                        <div class="metric-value" id="iteration-value">0</div>
+                    </div>
+                    
+                    <div class="metric-item">
+                        <div class="metric-label">Loss</div>
+                        <div class="metric-value" id="loss-value">--</div>
+                    </div>
+                    
+                    <div class="metric-item">
+                        <div class="metric-label">Elapsed Time</div>
+                        <div class="metric-value" id="elapsed-value">00:00:00</div>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Chart as main content area -->
+            <section class="chart-section" id="chart">
+                <div class="chart-container">
+                    <div class="chart-title">Training Loss Curve</div>
+                    <div class="chart-wrapper">
+                        <div class="chart-canvas-container">
+                            <!-- Chart.js enhanced canvas -->
+                            <canvas id="loss-chart-canvas"></canvas>
+                            <!-- Fallback canvas for backwards compatibility -->
+                            <canvas id="loss-chart" width="800" height="400" style="display: none;">
+                                Your browser does not support the HTML5 Canvas element. Please upgrade to a modern browser to view the training loss chart.
+                            </canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+        
+        <footer class="footer">
+            nanoGPT Dashboard - Real-time Training Visualization
+        </footer>
+    </div>
+    
+    <script>
+        // WebSocket connection management
+        let connectionStatus = 'disconnected';
+        let websocket = null;
+        let reconnectAttempts = 0;
+        let maxReconnectAttempts = 5;
+        let reconnectTimeout = null;
+        let lastDataTimestamp = 0;
+        let pingInterval = null;
+        let connectionUrl = null;
+        
+        // Fallback HTTP polling for when WebSocket is not available
+        let pollingInterval = null;
+        let pollingIntervalMs = 2000;
+        let useWebSocketFallback = false;
+        
+        // Chart rendering variables
+        let canvas = null;
+        let ctx = null;
+        let lossData = [];
+        let chartPadding = { top: 40, right: 40, bottom: 60, left: 80 };
+        let gridColor = '#e0e0e0';
+        let lineColor = '#3498db';
+        let axisColor = '#666';
+        
+        // Chart.js configuration and variables
+        let lossChart = null;
+        let useChartJs = false;
+        
+        // Memory management configuration and monitoring
+        let memoryMonitoringEnabled = true;
+        let memoryCheckInterval = 30000; // Check memory every 30 seconds
+        let memoryLimitMB = 512; // Browser memory limit in MB (Requirement 1)
+        let memoryMonitorInterval = null;
+        let lastMemoryCheck = 0;
+        let memoryCheckHistory = [];
+        
+        // Chart.js configuration object - centralized for easy customization
+        const chartConfig = {
+            // Performance settings optimized for WebSocket real-time updates
+            maxDataPoints: 1000,
+            maxUpdateRate: 10, // Updates per second (Requirement 1.2: <500ms updates)
+            animationDuration: 200, // Fast animation for real-time feel
+            batchUpdateThreshold: 5, // Batch updates if more than 5 points queued
+            
+            // Visual settings
+            colors: {
+                primary: '#3498db',
+                primaryAlpha: 'rgba(52, 152, 219, 0.1)',
+                text: '#2c3e50',
+                grid: '#e0e0e0',
+                axis: '#666'
+            },
+            
+            // Chart settings
+            showPoints: true,
+            smoothLines: true,
+            responsive: true,
+            maintainAspectRatio: false,
+            resizeDelay: 200
+        };
+        
+        let chartJsData = {
+            labels: [],
+            datasets: [{
+                label: 'Training Loss',
+                data: [], // Will contain {x, y, timestamp} objects for enhanced data points
+                borderColor: chartConfig.colors.primary,
+                backgroundColor: chartConfig.colors.primaryAlpha,
+                borderWidth: 2,
+                fill: false,
+                tension: chartConfig.smoothLines ? 0.1 : 0,
+                pointRadius: chartConfig.showPoints ? 2 : 0,
+                pointHoverRadius: 6,
+                pointBorderColor: chartConfig.colors.primary,
+                pointBackgroundColor: chartConfig.colors.primary,
+                // Enable parsing of object data points for Chart.js 4.x
+                parsing: {
+                    xAxisKey: 'x',
+                    yAxisKey: 'y'
+                }
+            }],
+            // Additional data arrays for enhanced tooltips
+            timestamps: [],
+            iterations: []
+        };
+        
+        // Real-time update optimization for WebSocket messages
+        let updateQueue = [];
+        let isProcessingQueue = false;
+        let lastChartUpdate = 0;
+        
+        // Initialize WebSocket connection with fallback to HTTP polling
+        function initConnection() {
+            connectionStatus = 'connecting';
+            updateConnectionStatus();
+            
+            // Determine connection URL based on current protocol
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            connectionUrl = `${protocol}//${window.location.host}/ws`;
+            
+            // Try WebSocket first, fallback to HTTP polling if needed
+            if (typeof WebSocket !== 'undefined') {
+                initWebSocket();
+            } else {
+                console.warn('WebSocket not supported, falling back to HTTP polling');
+                useWebSocketFallback = true;
+                startPolling();
+            }
+        }
+        
+        // Initialize WebSocket connection for real-time chart updates
+        function initWebSocket() {
+            try {
+                console.log('Attempting WebSocket connection to:', connectionUrl);
+                websocket = new WebSocket(connectionUrl);
+                
+                // WebSocket event handlers
+                websocket.onopen = function(event) {
+                    console.log('WebSocket connected successfully');
+                    connectionStatus = 'connected';
+                    reconnectAttempts = 0;
+                    clearReconnectTimeout();
+                    updateConnectionStatus();
+                    
+                    // Start ping/pong to keep connection alive
+                    startPingInterval();
+                    
+                    // Send initial connection message
+                    sendWebSocketMessage({
+                        type: 'client_connect',
+                        timestamp: Date.now() / 1000
+                    });
+                };
+                
+                websocket.onmessage = function(event) {
+                    try {
+                        const message = JSON.parse(event.data);
+                        handleIncomingMessage(message);
+                    } catch (error) {
+                        console.error('Error parsing WebSocket message:', error);
+                    }
+                };
+                
+                websocket.onclose = function(event) {
+                    console.log('WebSocket connection closed:', event.code, event.reason);
+                    connectionStatus = 'disconnected';
+                    updateConnectionStatus();
+                    stopPingInterval();
+                    
+                    // Attempt reconnection unless deliberately closed
+                    if (event.code !== 1000 && reconnectAttempts < maxReconnectAttempts) {
+                        scheduleReconnect();
+                    } else if (event.code !== 1000) {
+                        // Fall back to HTTP polling after max reconnect attempts
+                        console.warn('WebSocket max reconnect attempts reached, falling back to HTTP polling');
+                        useWebSocketFallback = true;
+                        startPolling();
+                    }
+                };
+                
+                websocket.onerror = function(event) {
+                    console.error('WebSocket error:', event);
+                    
+                    // If WebSocket fails immediately, fall back to HTTP polling
+                    if (connectionStatus === 'connecting') {
+                        console.warn('WebSocket connection failed, falling back to HTTP polling');
+                        useWebSocketFallback = true;
+                        startPolling();
+                    }
+                };
+                
+            } catch (error) {
+                console.error('Error initializing WebSocket:', error);
+                console.warn('Falling back to HTTP polling');
+                useWebSocketFallback = true;
+                startPolling();
+            }
+        }
+        
+        // Send message via WebSocket
+        function sendWebSocketMessage(message) {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                try {
+                    websocket.send(JSON.stringify(message));
+                } catch (error) {
+                    console.error('Error sending WebSocket message:', error);
+                }
+            }
+        }
+        
+        // Start periodic ping to keep WebSocket connection alive
+        function startPingInterval() {
+            stopPingInterval(); // Clear any existing interval
+            pingInterval = setInterval(() => {
+                sendWebSocketMessage({
+                    type: 'ping',
+                    timestamp: Date.now() / 1000
+                });
+            }, 30000); // Ping every 30 seconds
+        }
+        
+        // Stop ping interval
+        function stopPingInterval() {
+            if (pingInterval) {
+                clearInterval(pingInterval);
+                pingInterval = null;
+            }
+        }
+        
+        function startPolling() {
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+            }
+            
+            pollingInterval = setInterval(pollForData, pollingIntervalMs);
+            pollForData(); // Poll immediately
+        }
+        
+        function pollForData() {
+            fetch('/api/metrics')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (connectionStatus !== 'connected') {
+                        connectionStatus = 'connected';
+                        updateConnectionStatus();
+                        console.log('Connected to dashboard API');
+                    }
+                    
+                    if (data.status === 'success' && data.data && data.data.length > 0) {
+                        handleIncomingData(data.data);
+                    }
+                })
+                .catch(error => {
+                    console.error('Polling error:', error);
+                    if (connectionStatus !== 'error') {
+                        connectionStatus = 'error';
+                        updateConnectionStatus();
+                    }
+                });
+        }
+        
+        // Handle incoming training data
+        function handleIncomingData(dataArray) {
+            for (const dataPoint of dataArray) {
+                if (dataPoint.timestamp > lastDataTimestamp) {
+                    lastDataTimestamp = dataPoint.timestamp;
+                    updateTrainingMetrics(dataPoint);
+                }
+            }
+        }
+        
+        // Schedule reconnection with exponential backoff
+        function scheduleReconnect() {
+            if (reconnectAttempts >= maxReconnectAttempts) {
+                connectionStatus = 'failed';
+                updateConnectionStatus();
+                
+                // Try HTTP polling as final fallback
+                if (!useWebSocketFallback) {
+                    console.warn('WebSocket reconnection failed, trying HTTP polling fallback');
+                    useWebSocketFallback = true;
+                    startPolling();
+                }
+                return;
+            }
+            
+            const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+            reconnectAttempts++;
+            connectionStatus = `reconnecting_${reconnectAttempts}`;
+            updateConnectionStatus();
+            
+            reconnectTimeout = setTimeout(() => {
+                console.log(`Reconnection attempt ${reconnectAttempts}/${maxReconnectAttempts}`);
+                if (useWebSocketFallback) {
+                    // Retry HTTP polling
+                    startPolling();
+                } else {
+                    // Retry WebSocket connection
+                    initWebSocket();
+                }
+            }, delay);
+        }
+        
+        // Update connection status display
+        function updateConnectionStatus() {
+            const statusElement = document.getElementById('status-value');
+            let statusText, statusClass;
+            
+            if (connectionStatus === 'connected') {
+                const connectionType = useWebSocketFallback ? 'Polling' : 'WebSocket';
+                statusText = `Connected (${connectionType})`;
+                statusClass = 'status-training';
+            } else if (connectionStatus === 'error') {
+                statusText = 'Connection Error';
+                statusClass = 'status-error';
+            } else if (connectionStatus === 'failed') {
+                statusText = 'Connection Failed - Refresh to retry';
+                statusClass = 'status-error';
+            } else if (connectionStatus.startsWith('reconnecting_')) {
+                const attempt = connectionStatus.split('_')[1];
+                const connectionType = useWebSocketFallback ? 'Polling' : 'WebSocket';
+                statusText = `Reconnecting ${connectionType}... (${attempt}/${maxReconnectAttempts})`;
+                statusClass = 'status-complete';
+            } else {
+                statusText = 'Disconnected';
+                statusClass = 'status-error';
+            }
+            
+            statusElement.textContent = statusText;
+            statusElement.className = statusClass;
+        }
+        
+        // Enhanced WebSocket message handler for real-time chart updates
+        function handleIncomingMessage(message) {
+            try {
+                // Validate message structure
+                if (!message || typeof message !== 'object') {
+                    console.warn('Invalid message received:', message);
+                    return;
+                }
+                
+                // Handle message based on type with enhanced error handling
+                switch (message.type) {
+                    case 'training_update':
+                        if (message.data && typeof message.data === 'object') {
+                            // Update timestamp for connection tracking
+                            if (message.data.timestamp) {
+                                lastDataTimestamp = message.data.timestamp;
+                            }
+                            
+                            // Use queuing system for optimal WebSocket performance
+                            queueTrainingMetricsUpdate(message.data);
+                        } else {
+                            console.warn('Invalid training_update data:', message.data);
+                        }
+                        break;
+                        
+                    case 'status_update':
+                        if (message.data && typeof message.data === 'object') {
+                            updateTrainingStatus(message.data);
+                        } else {
+                            console.warn('Invalid status_update data:', message.data);
+                        }
+                        break;
+                        
+                    case 'connection_status':
+                        console.log('Connection status update:', message);
+                        if (message.status === 'connected') {
+                            console.log(`Connected as ${message.client_id} (${message.total_clients} total clients)`);
+                        }
+                        break;
+                        
+                    case 'client_count_update':
+                        const clientCount = message.data?.count || message.connected_clients || 0;
+                        console.log(`Connected clients: ${clientCount}`);
+                        break;
+                        
+                    case 'pong':
+                        // Handle ping/pong response for connection health
+                        console.debug('Pong received, connection healthy');
+                        break;
+                        
+                    case 'error':
+                        console.error('Server error message:', message.data || message.message);
+                        break;
+                        
+                    case 'batch_update':
+                        // Handle multiple training updates in a single message for optimal performance
+                        if (Array.isArray(message.data)) {
+                            console.debug(`Received batch update with ${message.data.length} data points`);
+                            
+                            // Filter and validate data points
+                            const validDataPoints = message.data.filter(dataPoint => {
+                                if (!dataPoint || typeof dataPoint !== 'object') {
+                                    return false;
+                                }
+                                
+                                // Update timestamp tracking
+                                if (dataPoint.timestamp) {
+                                    lastDataTimestamp = Math.max(lastDataTimestamp, dataPoint.timestamp);
+                                }
+                                
+                                return isValidDataPoint(dataPoint.iteration, dataPoint.loss);
+                            });
+                            
+                            // Use optimized batch processing for chart updates
+                            if (validDataPoints.length > 0) {
+                                // Update individual metrics display with latest point
+                                const latestPoint = validDataPoints[validDataPoints.length - 1];
+                                updateTrainingMetrics(latestPoint);
+                                
+                                // Add all points to chart in batch for performance
+                                if (validDataPoints.length > chartConfig.batchUpdateThreshold) {
+                                    // Large batch - use optimized batch processing
+                                    addBatchLossDataPoints(validDataPoints);
+                                } else {
+                                    // Small batch - use individual queuing system
+                                    validDataPoints.forEach(dataPoint => {
+                                        queueTrainingMetricsUpdate(dataPoint);
+                                    });
+                                }
+                                
+                                console.debug(`Processed ${validDataPoints.length} valid data points from batch`);
+                            } else {
+                                console.warn('No valid data points found in batch update');
+                            }
+                        } else {
+                            console.warn('Invalid batch_update format - expected array:', message.data);
+                        }
+                        break;
+                        
+                    default:
+                        console.log('Unknown message type:', message.type, message);
+                }
+                
+            } catch (error) {
+                console.error('Error processing WebSocket message:', error, message);
+            }
+        }
+        
+        // Format elapsed time as human-readable HH:MM:SS or MM:SS
+        function formatElapsedTime(seconds) {
+            if (isNaN(seconds) || seconds < 0) return '00:00';
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = Math.floor(seconds % 60);
+            return hours > 0 ? `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}` : `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        // Format loss value with appropriate precision
+        function formatLoss(loss) {
+            if (isNaN(loss)) return '--';
+            return loss.toFixed(4);
+        }
+
+        // Format iteration number with thousands separators
+        function formatIteration(iteration) {
+            if (isNaN(iteration)) return '0';
+            return iteration.toLocaleString();
+        }
+
+        // Queue training metrics update for optimal WebSocket performance
+        function queueTrainingMetricsUpdate(data) {
+            updateQueue.push(data);
+            
+            // Process queue immediately if below threshold or force if queue is getting large
+            if (updateQueue.length >= chartConfig.batchUpdateThreshold || updateQueue.length >= 10) {
+                processUpdateQueue();
+            } else if (!isProcessingQueue) {
+                // Schedule processing with slight delay to batch rapid updates
+                setTimeout(processUpdateQueue, 50);
+            }
+        }
+        
+        // Process queued updates in batch for optimal performance
+        function processUpdateQueue() {
+            if (isProcessingQueue || updateQueue.length === 0) {
+                return;
+            }
+            
+            isProcessingQueue = true;
+            
+            try {
+                // Process all queued updates
+                const updates = updateQueue.splice(0); // Take all updates and clear queue
+                
+                for (const data of updates) {
+                    updateTrainingMetrics(data);
+                }
+                
+                // Throttle chart updates for performance (Requirement 1.2: <500ms updates)
+                const now = Date.now();
+                if (now - lastChartUpdate >= (1000 / chartConfig.maxUpdateRate)) {
+                    updateChartDisplay();
+                    lastChartUpdate = now;
+                }
+                
+            } catch (error) {
+                console.error('Error processing update queue:', error);
+            } finally {
+                isProcessingQueue = false;
+                
+                // Check if more updates arrived while processing
+                if (updateQueue.length > 0) {
+                    setTimeout(processUpdateQueue, 10);
+                }
+            }
+        }
+        
+        // Update chart display (separated from data processing for performance)
+        function updateChartDisplay() {
+            if (useChartJs && lossChart) {
+                lossChart.update('none'); // No animation for real-time updates
+            } else if (!useChartJs) {
+                requestAnimationFrame(() => {
+                    drawChart();
+                });
+            }
+        }
+        
+        // Update training metrics display
+        function updateTrainingMetrics(data) {
+            if (data.iteration !== undefined) {
+                document.getElementById('iteration-value').textContent = formatIteration(data.iteration);
+            }
+            if (data.loss !== undefined) {
+                document.getElementById('loss-value').textContent = formatLoss(data.loss);
+                
+                // Update chart with new loss data point, including timestamp
+                if (data.iteration !== undefined) {
+                    addLossDataPoint(data.iteration, data.loss, data.timestamp);
+                }
+            }
+            if (data.elapsed_time !== undefined) {
+                document.getElementById('elapsed-value').textContent = formatElapsedTime(data.elapsed_time);
+            }
+        }
+        
+        // Update training status
+        function updateTrainingStatus(data) {
+            const statusElement = document.getElementById('status-value');
+            if (data.status) {
+                // Map status to display text and CSS class
+                let statusText = data.message || data.status;
+                let statusClass;
+                
+                switch (data.status.toLowerCase()) {
+                    case 'training':
+                        statusClass = 'status-training';
+                        break;
+                    case 'complete':
+                        statusClass = 'status-complete';
+                        statusText = data.message || 'Training Complete';
+                        break;
+                    case 'error':
+                    case 'interrupted':
+                        statusClass = 'status-error';
+                        break;
+                    default:
+                        statusClass = 'status-training';
+                }
+                
+                statusElement.textContent = statusText;
+                statusElement.className = statusClass;
+                
+                // Preserve final metrics when training completes
+                if (data.final && (data.status === 'complete' || data.status === 'error' || data.status === 'interrupted')) {
+                    // Final state reached - preserve current chart and metrics
+                    console.log(`Training ${data.status}: Final metrics preserved`);
+                }
+            }
+        }
+        
+        // Clear reconnection timeout
+        function clearReconnectTimeout() {
+            if (reconnectTimeout) {
+                clearTimeout(reconnectTimeout);
+                reconnectTimeout = null;
+            }
+        }
+        
+        // Configure chart settings dynamically
+        function configureChart(options = {}) {
+            // Merge provided options with default config
+            Object.assign(chartConfig, options);
+            
+            // Update chart data properties based on new config
+            if (chartJsData.datasets[0]) {
+                chartJsData.datasets[0].borderColor = chartConfig.colors.primary;
+                chartJsData.datasets[0].backgroundColor = chartConfig.colors.primaryAlpha;
+                chartJsData.datasets[0].tension = chartConfig.smoothLines ? 0.1 : 0;
+                chartJsData.datasets[0].pointRadius = chartConfig.showPoints ? 2 : 0;
+                chartJsData.datasets[0].pointBorderColor = chartConfig.colors.primary;
+                chartJsData.datasets[0].pointBackgroundColor = chartConfig.colors.primary;
+            }
+            
+            console.log('Chart configuration updated:', chartConfig);
+        }
+        
+        // Memory monitoring and management functions (Requirement 1: Memory limit 512MB)
+        
+        // Start memory monitoring for long training sessions
+        function startMemoryMonitoring() {
+            if (!memoryMonitoringEnabled) {
+                return;
+            }
+            
+            console.log('Starting client-side memory monitoring');
+            
+            // Stop any existing monitoring
+            stopMemoryMonitoring();
+            
+            // Start periodic memory checks
+            memoryMonitorInterval = setInterval(checkMemoryUsage, memoryCheckInterval);
+            
+            // Perform initial memory check
+            checkMemoryUsage();
+        }
+        
+        // Stop memory monitoring
+        function stopMemoryMonitoring() {
+            if (memoryMonitorInterval) {
+                clearInterval(memoryMonitorInterval);
+                memoryMonitorInterval = null;
+                console.log('Stopped client-side memory monitoring');
+            }
+        }
+        
+        // Check current memory usage and trigger cleanup if needed
+        function checkMemoryUsage() {
+            if (!memoryMonitoringEnabled) {
+                return;
+            }
+            
+            try {
+                // Use Performance API to get memory information (when available)
+                let memoryInfo = null;
+                let memoryUsageMB = 0;
+                
+                // Check for Performance Memory API (Chrome/Chromium browsers)
+                if (performance.memory) {
+                    memoryInfo = performance.memory;
+                    memoryUsageMB = memoryInfo.usedJSHeapSize / (1024 * 1024); // Convert to MB
+                    
+                    console.debug(`Memory usage: ${memoryUsageMB.toFixed(2)}MB (limit: ${memoryLimitMB}MB)`);
+                    
+                    // Store memory check in history for trend analysis
+                    memoryCheckHistory.push({
+                        timestamp: Date.now(),
+                        memoryUsageMB: memoryUsageMB,
+                        totalHeapSize: memoryInfo.totalJSHeapSize / (1024 * 1024),
+                        heapSizeLimit: memoryInfo.jsHeapSizeLimit / (1024 * 1024),
+                        dataPoints: getCurrentDataPointCount()
+                    });
+                    
+                    // Keep only last 20 memory checks in history
+                    if (memoryCheckHistory.length > 20) {
+                        memoryCheckHistory.shift();
+                    }
+                    
+                    // Check if memory usage exceeds limit (Requirement 1.8)
+                    if (memoryUsageMB > memoryLimitMB) {
+                        console.warn(`Memory usage (${memoryUsageMB.toFixed(2)}MB) exceeds limit (${memoryLimitMB}MB) - triggering cleanup`);
+                        performMemoryCleanup('memory_limit_exceeded');
+                        return;
+                    }
+                    
+                } else {
+                    // Fallback: Estimate memory usage based on data points
+                    const dataPointCount = getCurrentDataPointCount();
+                    const estimatedMemoryMB = estimateMemoryUsage(dataPointCount);
+                    
+                    console.debug(`Estimated memory usage: ${estimatedMemoryMB.toFixed(2)}MB (${dataPointCount} data points)`);
+                    
+                    if (estimatedMemoryMB > memoryLimitMB) {
+                        console.warn(`Estimated memory usage exceeds limit - triggering cleanup`);
+                        performMemoryCleanup('estimated_limit_exceeded');
+                        return;
+                    }
+                }
+                
+                lastMemoryCheck = Date.now();
+                
+            } catch (error) {
+                console.error('Error during memory check:', error);
+                // Continue without memory monitoring to avoid disrupting dashboard
+            }
+        }
+        
+        // Get current total data point count across all data structures
+        function getCurrentDataPointCount() {
+            let totalPoints = 0;
+            
+            // Chart.js data points
+            if (useChartJs && lossChart && lossChart.data) {
+                totalPoints += lossChart.data.labels.length;
+                totalPoints += lossChart.data.datasets[0].data.length;
+                totalPoints += chartJsData.timestamps.length;
+                totalPoints += chartJsData.iterations.length;
+            }
+            
+            // Canvas fallback data points
+            if (!useChartJs) {
+                totalPoints += lossData.length;
+            }
+            
+            return totalPoints;
+        }
+        
+        // Estimate memory usage based on data point count (fallback for browsers without Performance API)
+        function estimateMemoryUsage(dataPointCount) {
+            // Rough estimation: each data point uses ~200 bytes on average
+            // (including Chart.js overhead, timestamps, iteration numbers, etc.)
+            const bytesPerDataPoint = 200;
+            const baseMemoryMB = 50; // Base dashboard memory usage
+            
+            return baseMemoryMB + (dataPointCount * bytesPerDataPoint) / (1024 * 1024);
+        }
+        
+        // Perform memory cleanup when limits are exceeded
+        function performMemoryCleanup(reason) {
+            console.log(`Performing memory cleanup (reason: ${reason})`);
+            
+            try {
+                const beforeCount = getCurrentDataPointCount();
+                
+                // Calculate how many points to remove (remove 30% of data to provide buffer)
+                const removalPercentage = 0.3;
+                let pointsToRemove = Math.floor(beforeCount * removalPercentage);
+                
+                // Ensure we remove at least 100 points if we have them
+                pointsToRemove = Math.max(pointsToRemove, Math.min(100, beforeCount - 200));
+                
+                if (pointsToRemove > 0) {
+                    removeOldestDataPoints(pointsToRemove);
+                    
+                    const afterCount = getCurrentDataPointCount();
+                    console.log(`Memory cleanup completed: removed ${beforeCount - afterCount} data points`);
+                    
+                    // Force chart update after cleanup
+                    updateChartDisplay();
+                    
+                    // Schedule immediate garbage collection hint if available
+                    if (window.gc && typeof window.gc === 'function') {
+                        setTimeout(() => {
+                            try {
+                                window.gc();
+                                console.debug('Triggered garbage collection after memory cleanup');
+                            } catch (e) {
+                                console.debug('Garbage collection hint failed:', e);
+                            }
+                        }, 100);
+                    }
+                }
+                
+            } catch (error) {
+                console.error('Error during memory cleanup:', error);
+            }
+        }
+        
+        // Remove oldest data points from all data structures
+        function removeOldestDataPoints(pointsToRemove) {
+            if (pointsToRemove <= 0) {
+                return;
+            }
+            
+            console.debug(`Removing ${pointsToRemove} oldest data points for memory management`);
+            
+            if (useChartJs && lossChart && lossChart.data) {
+                // Remove from Chart.js data structures
+                const data = lossChart.data;
+                const actualRemoval = Math.min(pointsToRemove, data.labels.length);
+                
+                if (actualRemoval > 0) {
+                    // Use Chart.js optimized removal (splice is more efficient for large removals)
+                    data.labels.splice(0, actualRemoval);
+                    data.datasets[0].data.splice(0, actualRemoval);
+                    chartJsData.timestamps.splice(0, actualRemoval);
+                    chartJsData.iterations.splice(0, actualRemoval);
+                }
+                
+            } else if (!useChartJs) {
+                // Remove from canvas fallback data
+                const actualRemoval = Math.min(pointsToRemove, lossData.length);
+                if (actualRemoval > 0) {
+                    lossData.splice(0, actualRemoval);
+                }
+            }
+        }
+        
+        // Get memory monitoring statistics for debugging
+        function getMemoryStats() {
+            const stats = {
+                monitoringEnabled: memoryMonitoringEnabled,
+                lastCheck: lastMemoryCheck,
+                checkInterval: memoryCheckInterval,
+                memoryLimit: memoryLimitMB,
+                dataPoints: getCurrentDataPointCount(),
+                historyLength: memoryCheckHistory.length
+            };
+            
+            if (performance.memory) {
+                stats.currentMemory = {
+                    usedMB: (performance.memory.usedJSHeapSize / (1024 * 1024)).toFixed(2),
+                    totalMB: (performance.memory.totalJSHeapSize / (1024 * 1024)).toFixed(2),
+                    limitMB: (performance.memory.jsHeapSizeLimit / (1024 * 1024)).toFixed(2)
+                };
+            }
+            
+            return stats;
+        }
+        
+        // Expose memory monitoring functions globally for debugging and testing
+        window.dashboardMemory = {
+            getStats: getMemoryStats,
+            checkNow: checkMemoryUsage,
+            triggerCleanup: () => performMemoryCleanup('manual_trigger'),
+            startMonitoring: startMemoryMonitoring,
+            stopMonitoring: stopMemoryMonitoring,
+            getCurrentDataPoints: getCurrentDataPointCount,
+            setMemoryLimit: (limitMB) => {
+                memoryLimitMB = limitMB;
+                console.log(`Memory limit updated to ${limitMB}MB`);
+            },
+            getMemoryHistory: () => memoryCheckHistory.slice() // Return copy of history
+        };
+        
+        // Initialize chart with Chart.js or fallback to canvas
+        function initChart() {
+            console.log('Initializing chart with configuration:', chartConfig);
+            
+            // Try to initialize Chart.js first
+            if (typeof Chart !== 'undefined') {
+                try {
+                    initChartJs();
+                    useChartJs = true;
+                    console.log('Chart.js initialization successful');
+                    console.log('Chart features: Real-time updates, Interactive tooltips, Responsive design');
+                    return;
+                } catch (error) {
+                    console.error('Chart.js initialization failed:', error);
+                    console.warn('Falling back to canvas implementation');
+                }
+            } else {
+                console.warn('Chart.js library not available, using fallback canvas chart');
+            }
+            
+            // Fallback to canvas implementation
+            useChartJs = false;
+            try {
+                initCanvasChart();
+                console.log('Fallback canvas chart initialized successfully');
+            } catch (error) {
+                console.error('Failed to initialize fallback canvas chart:', error);
+                console.log('Chart display will be unavailable for this session');
+            }
+        }
+        
+        // Initialize Chart.js chart with enhanced configuration
+        function initChartJs() {
+            try {
+                const canvasElement = document.getElementById('loss-chart-canvas');
+                if (!canvasElement) {
+                    console.error('Canvas element not found');
+                    return false;
+                }
+                
+                // Ensure the container has dimensions
+                const container = canvasElement.parentElement;
+                if (container.clientHeight === 0 || container.clientWidth === 0) {
+                    console.log('Container has no dimensions, retrying...');
+                    setTimeout(initChartJs, 100);
+                    return false;
+                }
+                
+                console.log('Initializing Chart.js with container dimensions:', container.clientWidth, 'x', container.clientHeight);
+                
+                const ctx = canvasElement.getContext('2d');
+                
+                lossChart = new Chart(ctx, {
+                type: 'line',
+                data: chartJsData,
+                options: {
+                    responsive: chartConfig.responsive,
+                    maintainAspectRatio: chartConfig.maintainAspectRatio,
+                    
+                    // Layout configuration for proper spacing and visibility
+                    layout: {
+                        padding: {
+                            top: 10,
+                            bottom: 15,
+                            left: 15,
+                            right: 15
+                        }
+                    },
+                    
+                    // Enhanced animation configuration for real-time updates
+                    animation: {
+                        duration: chartConfig.animationDuration, // Reduced for faster real-time updates (Requirement 1.2)
+                        easing: 'easeInOutQuart'
+                    },
+                    
+                    // Performance optimizations for real-time data
+                    datasets: {
+                        line: {
+                            pointRadius: function(context) {
+                                // Show points only for the last few data points
+                                const index = context.dataIndex;
+                                const total = context.dataset.data.length;
+                                return (total - index) <= 10 ? 3 : 1;
+                            },
+                            pointHoverRadius: 5
+                        }
+                    },
+                    
+                    // Enhanced scales with dynamic range and better formatting
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            position: 'bottom',
+                            title: {
+                                display: true,
+                                text: 'Iteration',
+                                font: {
+                                    size: 14,
+                                    weight: 'bold'
+                                },
+                                color: '#2c3e50'
+                            },
+                            grid: {
+                                color: '#e0e0e0',
+                                drawOnChartArea: true
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    // Format large iteration numbers with K/M suffixes
+                                    if (value >= 1000000) {
+                                        return (value / 1000000).toFixed(1) + 'M';
+                                    } else if (value >= 1000) {
+                                        return (value / 1000).toFixed(0) + 'K';
+                                    }
+                                    return value.toString();
+                                },
+                                maxTicksLimit: 10,
+                                color: chartConfig.colors.axis
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Loss',
+                                font: {
+                                    size: 14,
+                                    weight: 'bold'
+                                },
+                                color: '#2c3e50'
+                            },
+                            grid: {
+                                color: '#e0e0e0',
+                                drawOnChartArea: true
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    // Format loss values with appropriate precision
+                                    if (value < 0.01) {
+                                        return value.toExponential(2);
+                                    }
+                                    return value.toFixed(4);
+                                },
+                                maxTicksLimit: 8,
+                                color: '#666'
+                            },
+                            // Auto-scale with padding for better visualization
+                            beginAtZero: false,
+                            grace: '5%'
+                        }
+                    },
+                    
+                    // Enhanced plugins configuration
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                usePointStyle: true,
+                                font: {
+                                    size: 12
+                                },
+                                color: '#2c3e50'
+                            }
+                        },
+                        
+                        // Enhanced tooltip with detailed metric information (Requirement 1.3 - Task 1.6)
+                        tooltip: {
+                            enabled: true,
+                            mode: 'index',
+                            intersect: false,
+                            backgroundColor: 'rgba(44, 62, 80, 0.95)',
+                            titleColor: '#fff',
+                            bodyColor: '#fff',
+                            borderColor: '#3498db',
+                            borderWidth: 2,
+                            cornerRadius: 8,
+                            displayColors: true,
+                            titleFont: {
+                                size: 14,
+                                weight: 'bold'
+                            },
+                            bodyFont: {
+                                size: 12
+                            },
+                            footerFont: {
+                                size: 11,
+                                style: 'italic'
+                            },
+                            padding: 12,
+                            callbacks: {
+                                title: function(context) {
+                                    // Enhanced title with iteration formatting
+                                    const iteration = context[0].label || context[0].parsed.x;
+                                    const formattedIteration = parseInt(iteration).toLocaleString();
+                                    return `Training Step ${formattedIteration}`;
+                                },
+                                label: function(context) {
+                                    const loss = context.parsed.y;
+                                    const precision = loss < 0.001 ? 8 : 6;
+                                    return `Loss: ${loss.toFixed(precision)}`;
+                                },
+                                afterLabel: function(context) {
+                                    const dataIndex = context.dataIndex;
+                                    const dataPoint = context.dataset.data[dataIndex];
+                                    const lines = [];
+                                    
+                                    // Get timestamp from data point or tracking arrays
+                                    let timestamp = null;
+                                    if (dataPoint && typeof dataPoint === 'object' && dataPoint.timestamp) {
+                                        timestamp = dataPoint.timestamp;
+                                    } else if (chartJsData.timestamps && chartJsData.timestamps[dataIndex]) {
+                                        timestamp = chartJsData.timestamps[dataIndex];
+                                    }
+                                    
+                                    // Add formatted timestamp
+                                    if (timestamp) {
+                                        const date = new Date(timestamp * 1000);
+                                        const timeStr = date.toLocaleTimeString();
+                                        const dateStr = date.toLocaleDateString();
+                                        lines.push(`Time: ${timeStr}`);
+                                        lines.push(`Date: ${dateStr}`);
+                                    }
+                                    
+                                    // Add training progress metrics if available
+                                    const iteration = context.parsed.x;
+                                    const loss = context.parsed.y;
+                                    
+                                    // Calculate training rate if we have multiple points
+                                    if (dataIndex > 0 && chartJsData.timestamps && chartJsData.timestamps[dataIndex - 1]) {
+                                        const prevTimestamp = chartJsData.timestamps[dataIndex - 1];
+                                        const prevIteration = chartJsData.iterations[dataIndex - 1];
+                                        
+                                        if (timestamp && prevTimestamp && iteration > prevIteration) {
+                                            const timeDiff = timestamp - prevTimestamp;
+                                            const iterDiff = iteration - prevIteration;
+                                            const rate = iterDiff / timeDiff;
+                                            lines.push(`Rate: ${rate.toFixed(2)} iter/sec`);
+                                        }
+                                    }
+                                    
+                                    // Calculate loss change if we have previous point
+                                    if (dataIndex > 0 && context.dataset.data[dataIndex - 1]) {
+                                        const prevLoss = context.dataset.data[dataIndex - 1].y || context.dataset.data[dataIndex - 1];
+                                        const lossChange = loss - prevLoss;
+                                        const lossChangePercent = ((lossChange / prevLoss) * 100);
+                                        
+                                        const changeSymbol = lossChange > 0 ? '↑' : '↓';
+                                        const changeColor = lossChange > 0 ? 'red' : 'green';
+                                        lines.push(`Change: ${changeSymbol} ${Math.abs(lossChange).toFixed(6)} (${lossChangePercent.toFixed(2)}%)`);
+                                    }
+                                    
+                                    // Add data point position info
+                                    const totalPoints = context.dataset.data.length;
+                                    lines.push(`Point: ${dataIndex + 1} of ${totalPoints}`);
+                                    
+                                    return lines;
+                                },
+                                footer: function(context) {
+                                    const dataIndex = context[0].dataIndex;
+                                    const totalPoints = context[0].dataset.data.length;
+                                    
+                                    // Add progress indicator for long training runs
+                                    if (totalPoints > 10) {
+                                        const progress = ((dataIndex + 1) / totalPoints * 100).toFixed(1);
+                                        return `Progress: ${progress}% through displayed data`;
+                                    }
+                                    
+                                    return 'Hover over points for detailed metrics';
+                                }
+                            }
+                        }
+                    },
+                    
+                    // Enhanced interaction configuration
+                    interaction: {
+                        mode: 'nearest',
+                        axis: 'x',
+                        intersect: false
+                    },
+                    
+                    // Memory and performance management for real-time updates
+                    elements: {
+                        line: {
+                            tension: 0.1, // Smooth curves
+                            borderWidth: 2
+                        },
+                        point: {
+                            radius: 2,
+                            hoverRadius: 6,
+                            hitRadius: 10
+                        }
+                    }
+                }
+            });
+            
+            // Add chart update method for better performance management
+            lossChart.updateRealtime = function(maxUpdateRate = 10) {
+                // Throttle updates to prevent performance issues
+                const now = Date.now();
+                if (!this.lastUpdate || (now - this.lastUpdate) >= (1000 / maxUpdateRate)) {
+                    this.update('none'); // No animation for real-time updates
+                    this.lastUpdate = now;
+                }
+            };
+            
+            console.log('✅ Chart.js successfully initialized!');
+            return true;
+            
+        } catch (error) {
+            console.error('❌ Failed to initialize Chart.js:', error);
+            console.log('Falling back to canvas implementation...');
+            initCanvasChart();
+            return false;
+        }
+        }
+        
+        // Initialize fallback canvas chart
+        function initCanvasChart() {
+            canvas = document.getElementById('loss-chart');
+            canvas.style.display = 'block';
+            ctx = canvas.getContext('2d');
+            drawChart();
+        }
+        
+        // Draw the complete chart
+        function drawChart() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw grid and axes
+            drawGrid();
+            drawAxes();
+            
+            // Draw loss curve if data exists
+            if (lossData.length > 0) {
+                drawLossLine();
+            } else {
+                drawEmptyMessage();
+            }
+        }
+        
+        // Draw grid lines
+        function drawGrid() {
+            ctx.strokeStyle = gridColor;
+            ctx.lineWidth = 1;
+            
+            const chartWidth = canvas.width - chartPadding.left - chartPadding.right;
+            const chartHeight = canvas.height - chartPadding.top - chartPadding.bottom;
+            
+            // Vertical grid lines
+            for (let i = 0; i <= 10; i++) {
+                const x = chartPadding.left + (chartWidth * i / 10);
+                ctx.beginPath();
+                ctx.moveTo(x, chartPadding.top);
+                ctx.lineTo(x, chartPadding.top + chartHeight);
+                ctx.stroke();
+            }
+            
+            // Horizontal grid lines
+            for (let i = 0; i <= 8; i++) {
+                const y = chartPadding.top + (chartHeight * i / 8);
+                ctx.beginPath();
+                ctx.moveTo(chartPadding.left, y);
+                ctx.lineTo(chartPadding.left + chartWidth, y);
+                ctx.stroke();
+            }
+        }
+        
+        // Draw chart axes with labels
+        function drawAxes() {
+            ctx.strokeStyle = axisColor;
+            ctx.lineWidth = 2;
+            ctx.font = '12px Arial';
+            ctx.fillStyle = axisColor;
+            
+            const chartWidth = canvas.width - chartPadding.left - chartPadding.right;
+            const chartHeight = canvas.height - chartPadding.top - chartPadding.bottom;
+            
+            // X-axis
+            ctx.beginPath();
+            ctx.moveTo(chartPadding.left, chartPadding.top + chartHeight);
+            ctx.lineTo(chartPadding.left + chartWidth, chartPadding.top + chartHeight);
+            ctx.stroke();
+            
+            // Y-axis
+            ctx.beginPath();
+            ctx.moveTo(chartPadding.left, chartPadding.top);
+            ctx.lineTo(chartPadding.left, chartPadding.top + chartHeight);
+            ctx.stroke();
+            
+            // X-axis label
+            ctx.textAlign = 'center';
+            ctx.fillText('Iteration', chartPadding.left + chartWidth / 2, canvas.height - 20);
+            
+            // Y-axis label
+            ctx.save();
+            ctx.translate(20, chartPadding.top + chartHeight / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText('Loss', 0, 0);
+            ctx.restore();
+            
+            // Draw axis tick marks and values
+            drawAxisTicks();
+        }
+        
+        // Draw axis tick marks and values with dynamic scaling
+        function drawAxisTicks() {
+            ctx.font = '10px Arial';
+            ctx.fillStyle = axisColor;
+            
+            const chartWidth = canvas.width - chartPadding.left - chartPadding.right;
+            const chartHeight = canvas.height - chartPadding.top - chartPadding.bottom;
+            const ranges = calculateAxisRanges();
+            
+            // X-axis ticks
+            for (let i = 0; i <= 5; i++) {
+                const iteration = ranges.iteration.min + (ranges.iteration.max - ranges.iteration.min) * i / 5;
+                const x = chartPadding.left + (chartWidth * i / 5);
+                ctx.textAlign = 'center';
+                ctx.fillText(Math.round(iteration).toString(), x, chartPadding.top + chartHeight + 15);
+            }
+            
+            // Y-axis ticks
+            for (let i = 0; i <= 4; i++) {
+                const loss = ranges.loss.min + (ranges.loss.max - ranges.loss.min) * (4 - i) / 4;
+                const y = chartPadding.top + (chartHeight * i / 4);
+                ctx.textAlign = 'right';
+                ctx.fillText(loss.toFixed(3), chartPadding.left - 10, y + 4);
+            }
+        }
+        
+        // Draw the loss curve line with dynamic scaling
+        function drawLossLine() {
+            if (lossData.length < 1) return;
+            
+            ctx.strokeStyle = lineColor;
+            ctx.lineWidth = 2;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            
+            const chartWidth = canvas.width - chartPadding.left - chartPadding.right;
+            const chartHeight = canvas.height - chartPadding.top - chartPadding.bottom;
+            const ranges = calculateAxisRanges();
+            
+            const iterationRange = ranges.iteration.max - ranges.iteration.min;
+            const lossRange = ranges.loss.max - ranges.loss.min;
+            
+            // Draw connecting line for multiple points
+            if (lossData.length > 1) {
+                ctx.beginPath();
+                for (let i = 0; i < lossData.length; i++) {
+                    const point = lossData[i];
+                    const x = chartPadding.left + ((point.iteration - ranges.iteration.min) / iterationRange) * chartWidth;
+                    const y = chartPadding.top + chartHeight - ((point.loss - ranges.loss.min) / lossRange) * chartHeight;
+                    
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.stroke();
+            }
+            
+            // Draw data points
+            ctx.fillStyle = lineColor;
+            for (let i = 0; i < lossData.length; i++) {
+                const point = lossData[i];
+                const x = chartPadding.left + ((point.iteration - ranges.iteration.min) / iterationRange) * chartWidth;
+                const y = chartPadding.top + chartHeight - ((point.loss - ranges.loss.min) / lossRange) * chartHeight;
+                
+                ctx.beginPath();
+                ctx.arc(x, y, 3, 0, 2 * Math.PI);
+                ctx.fill();
+            }
+        }
+        
+        // Draw empty chart message
+        function drawEmptyMessage() {
+            ctx.font = '16px Arial';
+            ctx.fillStyle = '#999';
+            ctx.textAlign = 'center';
+            ctx.fillText('Waiting for training data...', canvas.width / 2, canvas.height / 2);
+        }
+        
+        // Add loss data point and update chart with real-time scaling
+        function addLossDataPoint(iteration, loss, timestamp) {
+            // Validate input data
+            if (!isValidDataPoint(iteration, loss)) {
+                console.warn('Invalid data point:', { iteration, loss, timestamp });
+                return;
+            }
+            
+            try {
+                if (useChartJs) {
+                    addLossDataPointChartJs(iteration, loss, timestamp);
+                } else {
+                    addLossDataPointCanvas(iteration, loss, timestamp);
+                }
+            } catch (error) {
+                console.error('Error adding data point to chart:', error);
+            }
+        }
+        
+        // Validate data point values
+        function isValidDataPoint(iteration, loss) {
+            // Check for required values
+            if (iteration === undefined || loss === undefined) {
+                return false;
+            }
+            
+            // Check data types
+            if (typeof iteration !== 'number' || typeof loss !== 'number') {
+                return false;
+            }
+            
+            // Check for valid ranges
+            if (!isFinite(iteration) || !isFinite(loss)) {
+                return false;
+            }
+            
+            // Check for reasonable ranges
+            if (iteration < 0 || loss < 0 || loss > 1000) {
+                console.warn('Data point outside expected range:', { iteration, loss });
+                // Allow but warn - might be legitimate for some models
+            }
+            
+            return true;
+        }
+        
+        // Add data point to Chart.js chart with enhanced performance and timestamp tracking
+        function addLossDataPointChartJs(iteration, loss, timestamp) {
+            const maxPoints = chartConfig.maxDataPoints; // Use configuration value
+            
+            // Use current timestamp if not provided
+            const dataTimestamp = timestamp || Date.now() / 1000;
+            
+            // Enhanced real-time data point addition using Chart.js 4.x optimized API
+            if (lossChart && lossChart.data) {
+                // Use Chart.js recommended approach for real-time data updates
+                const data = lossChart.data;
+                
+                // Add new data point using Chart.js addData pattern
+                data.labels.push(iteration);
+                data.datasets[0].data.push({
+                    x: iteration,
+                    y: loss,
+                    timestamp: dataTimestamp
+                });
+                
+                // Update additional tracking arrays
+                chartJsData.timestamps.push(dataTimestamp);
+                chartJsData.iterations.push(iteration);
+                
+                // Memory management: remove oldest points when limit exceeded (Requirement 1.6)
+                if (data.labels.length > maxPoints) {
+                    // Calculate number of points to remove (remove 10% extra as buffer)
+                    const removalCount = Math.max(1, Math.floor(data.labels.length * 0.1));
+                    
+                    // Remove oldest data using optimized bulk removal
+                    data.labels.splice(0, removalCount);
+                    data.datasets[0].data.splice(0, removalCount);
+                    chartJsData.timestamps.splice(0, removalCount);
+                    chartJsData.iterations.splice(0, removalCount);
+                    
+                    // Log memory management action for debugging
+                    console.debug(`Chart memory management: Removed ${removalCount} oldest data points, now displaying ${data.labels.length} points`);
+                    
+                    // Trigger memory check after large removals
+                    if (memoryMonitoringEnabled && removalCount > 10) {
+                        setTimeout(checkMemoryUsage, 1000);
+                    }
+                }
+                
+                // Optimized chart update with performance monitoring
+                const updateStart = performance.now();
+                
+                // Use Chart.js 4.x optimized update modes for real-time performance
+                if (lossChart.updateRealtime) {
+                    // Use custom optimized update method if available
+                    lossChart.updateRealtime(chartConfig.maxUpdateRate);
+                } else {
+                    // Fallback to Chart.js standard update with animation control
+                    // 'none' mode provides fastest updates for real-time data
+                    lossChart.update('none');
+                }
+                
+                // Performance monitoring for update optimization
+                const updateDuration = performance.now() - updateStart;
+                if (updateDuration > 50) { // Log slow updates (>50ms)
+                    console.warn(`Chart update took ${updateDuration.toFixed(2)}ms - consider optimization`);
+                }
+                
+            } else {
+                // Fallback to legacy data structure if chart not properly initialized
+                console.warn('Chart.js instance not available, using fallback data structure');
+                
+                chartJsData.labels.push(iteration);
+                chartJsData.datasets[0].data.push(loss);
+                chartJsData.timestamps.push(dataTimestamp);
+                chartJsData.iterations.push(iteration);
+                
+                // Memory management for fallback mode
+                if (chartJsData.labels.length > maxPoints) {
+                    chartJsData.labels.shift();
+                    chartJsData.datasets[0].data.shift();
+                    chartJsData.timestamps.shift();
+                    chartJsData.iterations.shift();
+                }
+                
+                // Attempt chart update if chart instance exists
+                if (lossChart) {
+                    try {
+                        lossChart.update('none');
+                    } catch (error) {
+                        console.error('Failed to update chart in fallback mode:', error);
+                    }
+                }
+            }
+        }
+        
+        // Add multiple data points in batch for optimal performance
+        function addBatchLossDataPoints(dataPoints) {
+            if (!Array.isArray(dataPoints) || dataPoints.length === 0) {
+                console.warn('Invalid batch data points provided:', dataPoints);
+                return;
+            }
+            
+            console.debug(`Adding batch of ${dataPoints.length} data points to chart`);
+            
+            if (useChartJs && lossChart && lossChart.data) {
+                const data = lossChart.data;
+                const maxPoints = chartConfig.maxDataPoints;
+                const batchStart = performance.now();
+                
+                // Process each data point in the batch
+                for (const point of dataPoints) {
+                    if (isValidDataPoint(point.iteration, point.loss)) {
+                        const dataTimestamp = point.timestamp || Date.now() / 1000;
+                        
+                        // Add data point using optimized Chart.js pattern
+                        data.labels.push(point.iteration);
+                        data.datasets[0].data.push({
+                            x: point.iteration,
+                            y: point.loss,
+                            timestamp: dataTimestamp
+                        });
+                        
+                        // Update tracking arrays
+                        chartJsData.timestamps.push(dataTimestamp);
+                        chartJsData.iterations.push(point.iteration);
+                    }
+                }
+                
+                // Apply memory management after batch processing
+                const pointsToRemove = Math.max(0, data.labels.length - maxPoints);
+                if (pointsToRemove > 0) {
+                    console.debug(`Removing ${pointsToRemove} oldest points for batch memory management`);
+                    
+                    // Remove oldest points using optimized bulk removal
+                    data.labels.splice(0, pointsToRemove);
+                    data.datasets[0].data.splice(0, pointsToRemove);
+                    chartJsData.timestamps.splice(0, pointsToRemove);
+                    chartJsData.iterations.splice(0, pointsToRemove);
+                    
+                    // Trigger memory check after significant batch operations
+                    if (memoryMonitoringEnabled && pointsToRemove > 50) {
+                        setTimeout(checkMemoryUsage, 2000);
+                    }
+                }
+                
+                // Single chart update for entire batch (performance optimization)
+                const updateStart = performance.now();
+                
+                if (lossChart.updateRealtime) {
+                    lossChart.updateRealtime(chartConfig.maxUpdateRate);
+                } else {
+                    lossChart.update('none'); // No animation for batch updates
+                }
+                
+                const updateDuration = performance.now() - updateStart;
+                const batchDuration = performance.now() - batchStart;
+                
+                console.debug(`Batch update completed: ${batchDuration.toFixed(2)}ms total, ${updateDuration.toFixed(2)}ms chart update`);
+                
+                if (updateDuration > 100) { // Log slow batch updates
+                    console.warn(`Batch chart update took ${updateDuration.toFixed(2)}ms for ${dataPoints.length} points - consider reducing batch size`);
+                }
+            } else {
+                // Fallback to individual point addition for non-Chart.js mode
+                console.debug('Using fallback mode for batch data points');
+                for (const point of dataPoints) {
+                    if (isValidDataPoint(point.iteration, point.loss)) {
+                        addLossDataPointCanvas(point.iteration, point.loss, point.timestamp);
+                    }
+                }
+            }
+        }
+        
+        // Add data point to canvas chart (fallback)
+        function addLossDataPointCanvas(iteration, loss, timestamp) {
+            lossData.push({ iteration, loss, timestamp: timestamp || Date.now() / 1000 });
+            
+            // Keep only last 100 points for performance
+            if (lossData.length > 100) {
+                lossData.shift();
+            }
+            
+            // Trigger smooth real-time chart update
+            requestAnimationFrame(() => {
+                drawChart();
+            });
+        }
+        
+        // Calculate dynamic axis ranges with proper margins
+        function calculateAxisRanges() {
+            if (lossData.length === 0) {
+                return { iteration: { min: 0, max: 100 }, loss: { min: 0, max: 1 } };
+            }
+            
+            const iterations = lossData.map(d => d.iteration);
+            const losses = lossData.map(d => d.loss);
+            
+            const iterationMin = Math.min(...iterations);
+            const iterationMax = Math.max(...iterations);
+            const lossMin = Math.min(...losses);
+            const lossMax = Math.max(...losses);
+            
+            // Add margins for better visualization
+            const iterationRange = iterationMax - iterationMin || 1;
+            const lossRange = lossMax - lossMin || 0.1;
+            
+            return {
+                iteration: {
+                    min: Math.max(0, iterationMin - iterationRange * 0.05),
+                    max: iterationMax + iterationRange * 0.05
+                },
+                loss: {
+                    min: Math.max(0, lossMin - lossRange * 0.1),
+                    max: lossMax + lossRange * 0.1
+                }
+            };
+        }
+        
+        // Initialize HTTP polling connection on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            // Small delay to ensure layout is computed
+            setTimeout(() => {
+                console.log('🚀 Starting dashboard initialization...');
+                initChart();
+                initConnection();
+            }, 100);
+            
+            // Start memory monitoring for long training sessions
+            startMemoryMonitoring();
+        });
+        
+        // Clean up on page unload
+        window.addEventListener('beforeunload', function() {
+            // Clean up WebSocket connection
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                websocket.close(1000, 'Page unloading');
+            }
+            
+            // Clean up polling if active
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+            }
+            
+            // Clean up ping interval
+            stopPingInterval();
+            
+            // Clear reconnection timeout
+            clearReconnectTimeout();
+            
+            // Stop memory monitoring
+            stopMemoryMonitoring();
+        });
+    </script>
+</body>
+</html>

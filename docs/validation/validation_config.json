@@ -1,0 +1,69 @@
+{
+  "validation_rules": {
+    "code_syntax": {
+      "enabled": true,
+      "languages": ["python", "bash", "shell", "sh"],
+      "strict_mode": true
+    },
+    "link_checking": {
+      "enabled": true,
+      "check_external_links": true,
+      "external_link_timeout": 10,
+      "ignore_external_domains": [
+        "localhost",
+        "127.0.0.1",
+        "example.com"
+      ]
+    },
+    "structure_validation": {
+      "enabled": true,
+      "max_heading_jump": 1,
+      "require_main_heading": true,
+      "check_code_block_matching": true
+    },
+    "terminology_consistency": {
+      "enabled": true,
+      "case_sensitive": false,
+      "standard_terms": {
+        "gpt": "GPT",
+        "pytorch": "PyTorch",
+        "transformer": "Transformer",
+        "attention": "attention",
+        "embedding": "embedding",
+        "nanogpt": "nanoGPT",
+        "openai": "OpenAI",
+        "huggingface": "HuggingFace"
+      }
+    },
+    "cross_reference_validation": {
+      "enabled": true,
+      "check_orphaned_files": true,
+      "exclude_from_orphan_check": [
+        "README.md",
+        ".gitkeep",
+        "validation_report.json"
+      ]
+    }
+  },
+  "file_patterns": {
+    "include": ["*.md"],
+    "exclude": [
+      "node_modules/**",
+      ".git/**",
+      "**/.gitkeep",
+      "**/validation_report.json"
+    ]
+  },
+  "output_settings": {
+    "report_format": "json",
+    "include_line_numbers": true,
+    "group_by_file": true,
+    "show_passed_checks": false,
+    "verbose_messages": true
+  },
+  "quality_thresholds": {
+    "max_failures": 0,
+    "max_warnings": 10,
+    "min_pass_rate": 0.95
+  }
+}
