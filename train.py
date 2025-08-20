@@ -404,6 +404,15 @@ while True:
                     'loss': lossf,
                     'elapsed': elapsed_time
                 })
+                
+                # Parameter extraction and broadcasting (adaptive sampling)
+                if dashboard_broadcaster.should_extract_parameters(iter_num):
+                    print(f"[DEBUG] Extracting parameters for iteration {iter_num}")
+                    parameter_data = dashboard_broadcaster.extract_parameters(model)
+                    if parameter_data:
+                        dashboard_broadcaster.broadcast_parameters(parameter_data, iter_num)
+                        print(f"[DEBUG] Parameter extraction and broadcast completed")
+                
                 print(f"[DEBUG] Dashboard logging completed successfully")
             except Exception as e:
                 # Fail-safe: continue training even if dashboard logging fails

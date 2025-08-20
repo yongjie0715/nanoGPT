@@ -15,6 +15,7 @@ import socket
 import threading
 import webbrowser
 import json
+import numpy as np
 from collections import deque
 from typing import Dict, Any, Optional
 
@@ -766,3 +767,298 @@ class DashboardBroadcaster:
             
         except Exception as e:
             print(f"Warning: Error during server resource cleanup: {e}")
+    
+    def extract_parameters(self, model, max_samples: int = 1000) -> Optional[Dict[str, Any]]:
+        """
+        Extract parameter samples from the GPT model for visualization.
+        
+        This method samples parameters from token embeddings, position embeddings,
+        and transformer layers to provide data for 3D parameter visualization.
+        
+        Args:
+            model: The GPT model instance
+            max_samples: Maximum number of parameter samples to extract per type
+            
+        Returns:
+            Dictionary containing parameter data or None if extraction fails
+        """
+        if not self.enabled:
+            return None
+            
+        try:
+            import torch
+            
+            # Ensure model is in evaluation mode for parameter extraction
+            was_training = model.training
+            model.eval()
+            
+            parameter_data = {
+                'token_embeddings': [],
+                'position_embeddings': [],
+                'layer_weights': [],
+                'metadata': {
+                    'vocab_size': model.config.vocab_size,
+                    'n_embd': model.config.n_embd,
+                    'n_layer': model.config.n_layer,
+                    'block_size': model.config.block_size
+                }
+            }
+            
+            with torch.no_grad():
+                # Extract token embedding samples
+                if hasattr(model.transformer, 'wte') and model.transformer.wte.weight is not None:
+                    token_weights = model.transformer.wte.weight.cpu().numpy()
+                    vocab_size, emb_dim = token_weights.shape
+                    
+                    # Sample token embeddings (limit to max_samples)
+                    sample_indices = np.random.choice(vocab_size, 
+                                                    min(max_samples, vocab_size), 
+                                                    replace=False)
+                    
+                    for idx in sample_indices:
+                        parameter_data['token_embeddings'].append({
+                            'token_id': int(idx),
+                            'values': token_weights[idx].tolist(),
+                            'magnitude': float(np.linalg.norm(token_weights[idx])),
+                            'type': 'token_embedding'
+                        })
+                
+                # Extract position embedding samples
+                if hasattr(model.transformer, 'wpe') and model.transformer.wpe.weight is not None:
+                    pos_weights = model.transformer.wpe.weight.cpu().numpy()
+                    block_size, emb_dim = pos_weights.shape
+                    
+                    # Sample position embeddings (limit to max_samples)
+                    sample_indices = np.random.choice(block_size, 
+                                                    min(max_samples, block_size), 
+                                                    replace=False)
+                    
+                    for idx in sample_indices:
+                        parameter_data['position_embeddings'].append({
+                            'position': int(idx),
+                            'values': pos_weights[idx].tolist(),
+                            'magnitude': float(np.linalg.norm(pos_weights[idx])),
+                            'type': 'position_embedding'
+                        })
+                
+                # Extract samples from transformer layers
+                if hasattr(model.transformer, 'h'):
+                    for layer_idx, block in enumerate(model.transformer.h):
+                        # Sample from attention weights
+                        if hasattr(block.attn, 'c_attn') and block.attn.c_attn.weight is not None:
+                            attn_weights = block.attn.c_attn.weight.cpu().numpy()
+                            
+                            # Sample a subset of attention weights
+                            flat_weights = attn_weights.flatten()
+                            sample_indices = np.random.choice(len(flat_weights), 
+                                                            min(max_samples // model.config.n_layer, len(flat_weights)), 
+                                                            replace=False)
+                            
+                            for i, idx in enumerate(sample_indices):
+                                parameter_data['layer_weights'].append({
+                                    'layer': layer_idx,
+                                    'component': 'attention',
+                                    'index': int(idx),
+                                    'value': float(flat_weights[idx]),
+                                    'magnitude': float(abs(flat_weights[idx])),
+                                    'type': 'layer_weight'
+                                })
+            
+            # Restore original training mode
+            if was_training:
+                model.train()
+            
+            return parameter_data
+            
+        except Exception as e:
+            print(f"Warning: Parameter extraction failed: {e}")
+            # Restore training mode on error
+            try:
+                if was_training:
+                    model.train()
+            except:
+                pass
+            return None
+    
+    def broadcast_parameters(self, parameter_data: Dict[str, Any], iteration: int) -> None:
+        """
+        Broadcast parameter data to connected clients via WebSocket.
+        
+        This method sends parameter visualization data to all connected dashboard
+        clients using the existing WebSocket infrastructure with validation and compression.
+        
+        Args:
+            parameter_data: Parameter data from extract_parameters()
+            iteration: Current training iteration number
+        """
+        if not self.enabled or not parameter_data:
+            return
+            
+        try:
+            # Validate parameter data structure
+            if not self._validate_parameter_data(parameter_data):
+                print(f"Warning: Invalid parameter data structure for iteration {iteration}")
+                self._log_debug(f"Parameter data validation failed for iteration {iteration}")
+                return
+            
+            # Compress parameter data to reduce transmission size
+            compressed_data = self._compress_parameter_data(parameter_data)
+            
+            # Create parameter update message
+            parameter_message = {
+                "type": "parameter_update",
+                "data": {
+                    "iteration": iteration,
+                    "parameters": compressed_data,
+                    "timestamp": time.time()
+                }
+            }
+            
+            # Broadcast to all connected clients using existing infrastructure
+            self._broadcast_to_clients(parameter_message)
+            
+            # Debug logging
+            self._log_debug(f"Parameter data validated, compressed, and broadcasted for iteration {iteration}")
+            
+        except Exception as e:
+            print(f"Warning: Parameter broadcast failed: {e}")
+            self._log_debug(f"Parameter broadcast error: {e}")
+    
+    def should_extract_parameters(self, iteration: int, 
+                                 base_interval: int = 50, 
+                                 fast_interval: int = 10,
+                                 slow_interval: int = 100) -> bool:
+        """
+        Determine if parameters should be extracted at the current iteration.
+        
+        This method implements adaptive sampling based on training speed and
+        client connections to minimize performance impact while providing
+        useful visualization updates.
+        
+        Args:
+            iteration: Current training iteration
+            base_interval: Default extraction interval (every N iterations)
+            fast_interval: Fast extraction interval for early training
+            slow_interval: Slow extraction interval for later training
+            
+        Returns:
+            True if parameters should be extracted, False otherwise
+        """
+        if not self.enabled or not self.websocket_clients:
+            return False  # No extraction if disabled or no clients connected
+            
+        try:
+            # Early training (first 1000 iterations): more frequent updates
+            if iteration < 1000:
+                return iteration % fast_interval == 0
+            
+            # Later training: less frequent updates to reduce overhead
+            elif iteration > 5000:
+                return iteration % slow_interval == 0
+            
+            # Middle training: standard interval
+            else:
+                return iteration % base_interval == 0
+                
+        except Exception as e:
+            print(f"Warning: Parameter sampling decision failed: {e}")
+            return False
+    
+    def _validate_parameter_data(self, parameter_data: Dict[str, Any]) -> bool:
+        """
+        Validate parameter data structure and content before transmission.
+        
+        Args:
+            parameter_data: Parameter data dictionary to validate
+            
+        Returns:
+            True if data is valid, False otherwise
+        """
+        try:
+            # Check required top-level keys
+            required_keys = ['token_embeddings', 'position_embeddings', 'layer_weights', 'metadata']
+            if not all(key in parameter_data for key in required_keys):
+                return False
+            
+            # Validate metadata
+            metadata = parameter_data.get('metadata', {})
+            required_metadata = ['vocab_size', 'n_embd', 'n_layer', 'block_size']
+            if not all(key in metadata for key in required_metadata):
+                return False
+            
+            # Check data types and reasonable limits
+            for embedding_list in [parameter_data['token_embeddings'], parameter_data['position_embeddings']]:
+                if not isinstance(embedding_list, list):
+                    return False
+                if len(embedding_list) > 2000:  # Reasonable limit for visualization
+                    return False
+            
+            if not isinstance(parameter_data['layer_weights'], list):
+                return False
+            if len(parameter_data['layer_weights']) > 5000:  # Reasonable limit
+                return False
+            
+            return True
+            
+        except Exception as e:
+            print(f"Warning: Parameter data validation failed: {e}")
+            return False
+    
+    def _compress_parameter_data(self, parameter_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Compress parameter data to reduce WebSocket transmission size.
+        
+        This method reduces precision and limits data size while preserving
+        visualization quality for the 3D parameter display.
+        
+        Args:
+            parameter_data: Raw parameter data dictionary
+            
+        Returns:
+            Compressed parameter data dictionary
+        """
+        try:
+            compressed_data = {
+                'metadata': parameter_data['metadata'].copy(),
+                'token_embeddings': [],
+                'position_embeddings': [],
+                'layer_weights': []
+            }
+            
+            # Compress token embeddings (reduce precision, limit values)
+            for embedding in parameter_data['token_embeddings'][:1000]:  # Limit to 1000 samples
+                compressed_embedding = {
+                    'token_id': embedding['token_id'],
+                    'values': [round(float(v), 4) for v in embedding['values'][:64]],  # Limit dimensions, reduce precision
+                    'magnitude': round(embedding['magnitude'], 4),
+                    'type': embedding['type']
+                }
+                compressed_data['token_embeddings'].append(compressed_embedding)
+            
+            # Compress position embeddings
+            for embedding in parameter_data['position_embeddings'][:500]:  # Limit to 500 samples
+                compressed_embedding = {
+                    'position': embedding['position'],
+                    'values': [round(float(v), 4) for v in embedding['values'][:64]],  # Limit dimensions
+                    'magnitude': round(embedding['magnitude'], 4),
+                    'type': embedding['type']
+                }
+                compressed_data['position_embeddings'].append(compressed_embedding)
+            
+            # Compress layer weights
+            for weight in parameter_data['layer_weights'][:2000]:  # Limit to 2000 samples
+                compressed_weight = {
+                    'layer': weight['layer'],
+                    'component': weight['component'],
+                    'index': weight['index'],
+                    'value': round(weight['value'], 6),  # Higher precision for individual weights
+                    'magnitude': round(weight['magnitude'], 6),
+                    'type': weight['type']
+                }
+                compressed_data['layer_weights'].append(compressed_weight)
+            
+            return compressed_data
+            
+        except Exception as e:
+            print(f"Warning: Parameter data compression failed: {e}")
+            return parameter_data  # Return original data if compression fails
